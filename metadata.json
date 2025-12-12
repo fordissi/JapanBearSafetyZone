@@ -1,0 +1,7 @@
+{
+  "name": "Japan Safe Trip - Bear Zone",
+  "description": "A safety application for travelers in Japan to track bear sightings, receive proximity alerts, and learn safety protocols.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
