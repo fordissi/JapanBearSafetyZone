@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Info, Leaf, Mountain, Share2, Key, Settings, ArrowRight, Activity, Twitter, Globe, Edit3, X, Save, Cloud, CloudLightning, WifiOff, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
+import { Info, Leaf, Mountain, Share2, Key, Settings, ArrowRight, Activity, Twitter, Globe, Edit3, X, Save, Cloud, CloudLightning, WifiOff, AlertTriangle, RefreshCw, Zap, Camera } from 'lucide-react';
 import BearMap from './components/BearMap';
 import AlertSystem from './components/AlertSystem';
 import Quiz from './components/Quiz';
 import GearChecklist from './components/GearChecklist';
+import ReportModal from './components/ReportModal'; // NEW
 import { BearHotspot } from './types';
 import { performScan } from './utils/aiService';
 
@@ -20,6 +21,8 @@ const App: React.FC = () => {
   const [keyStatusText, setKeyStatusText] = useState<string>('System Ready');
   const [cooldown, setCooldown] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false); // New state for report modal
+  const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | undefined>(undefined);
 
   // Guidelines: API Key handled externally via process.env.API_KEY.
   const [manualKeys, setManualKeys] = useState<{xai: string}>({
@@ -32,6 +35,16 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [cooldown]);
+
+  // Initial Location Check for Reporting
+  useEffect(() => {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+            (err) => console.log("User location denied/unavailable", err)
+        );
+    }
+  }, []);
 
   const formatUpdateString = (timestamp: number, counts: { grok: number, gemini: number, overlap?: number }) => {
     const date = new Date(timestamp);
@@ -93,6 +106,19 @@ const App: React.FC = () => {
     }
   };
 
+  const handleNewReport = (report: BearHotspot) => {
+    // Add new verified report to the list
+    const updated = [report, ...hotspots];
+    setHotspots(updated);
+    // Update cache as well to persist the user report locally
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        data: updated,
+        timestamp: Date.now(),
+        counts: { grok: 0, gemini: updated.length } // simplified count update
+    }));
+    setShowReportModal(false);
+  };
+
   const saveManualKey = (type: 'xai', value: string) => {
     const updated = value.trim();
     setManualKeys(prev => ({ ...prev, [type]: updated }));
@@ -114,6 +140,16 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-16 selection:bg-red-200">
       
+      {/* Report Modal */}
+      {showReportModal && (
+        <ReportModal 
+            onClose={() => setShowReportModal(false)}
+            onSubmit={handleNewReport}
+            userLocation={userLocation}
+            xaiKey={manualKeys.xai} // PASS XAI KEY FOR DUAL VOTING
+        />
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -140,9 +176,12 @@ const App: React.FC = () => {
                       type="password"
                       value={manualKeys.xai}
                       onChange={(e) => saveManualKey('xai', e.target.value)}
-                      placeholder="因 CORS 限制，瀏覽器直接呼叫可能會失敗"
+                      placeholder="設定後可啟用「雙重 AI 驗證」機制"
                       className="w-full pl-4 pr-10 py-3 rounded-xl border border-slate-300 focus:border-slate-500 focus:ring-2 focus:ring-slate-200 outline-none transition-all font-mono text-sm"
                     />
+                    <p className="text-xs text-slate-400 mt-1">
+                       * 若未設定，系統將使用 Gemini 進行二次自我查核。
+                    </p>
                  </div>
                  <div className="pt-4">
                     <button onClick={() => setShowSettings(false)} className="w-full py-3 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-all">
@@ -159,14 +198,24 @@ const App: React.FC = () => {
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-red-600 rounded-full mix-blend-overlay filter blur-[100px] opacity-20 -translate-y-1/2 translate-x-1/4 animate-pulse"></div>
         <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-blue-600 rounded-full mix-blend-overlay filter blur-[80px] opacity-20 translate-y-1/3 -translate-x-1/4"></div>
         
-        {/* API Settings Button (Top Right) */}
-        <div className="absolute top-6 right-6 z-50">
+        {/* Top Right Controls Container */}
+        <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
+            {/* Report Button (Moved Here) */}
+            <button 
+                onClick={() => setShowReportModal(true)}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg transition-transform hover:scale-105 active:scale-95 border border-red-500"
+            >
+                <Camera size={18} />
+                <span className="hidden sm:inline">回報目擊</span>
+            </button>
+
+            {/* Settings Button */}
             <button 
                 onClick={() => setShowSettings(true)}
                 className="flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 backdrop-blur-md px-4 py-2 rounded-full text-sm font-bold transition-all text-slate-200 hover:text-white hover:scale-105 active:scale-95 shadow-lg"
             >
                 <Settings size={18} />
-                <span>API 金鑰設定</span>
+                <span className="hidden sm:inline">API 設定</span>
             </button>
         </div>
 
@@ -208,7 +257,7 @@ const App: React.FC = () => {
 
            <BearMap 
              hotspots={hotspots} 
-             onScan={handleScan} 
+             onScan={handleScan}
              loading={loading}
              lastUpdated={lastUpdated}
              cooldown={cooldown}

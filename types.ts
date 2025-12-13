@@ -1,3 +1,4 @@
+
 export interface BearHotspot {
   id: string;
   lat: number;
@@ -8,7 +9,9 @@ export interface BearHotspot {
   source: string;
   date: string; // YYYY-MM-DD
   url?: string; // Optional external link
-  provider?: 'gemini' | 'grok'; // Distinguished AI Source
+  provider?: 'gemini' | 'grok' | 'user'; // Distinguished AI Source or User
+  verificationStatus?: 'VERIFIED' | 'PENDING' | 'REJECTED'; // For user reports
+  confidence?: number; // AI confidence score
 }
 
 export interface QuizQuestion {
