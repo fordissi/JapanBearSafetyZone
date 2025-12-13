@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckSquare, Square, Backpack, ShoppingBag } from 'lucide-react';
+import { CheckSquare, Square, Backpack, ShoppingBag, MapPin } from 'lucide-react';
 
 interface GearItem {
   id: string;
@@ -84,13 +84,15 @@ const GearChecklist: React.FC = () => {
 
       <div className="mt-6 pt-4 border-t border-slate-100 text-center">
         <a 
-          href="https://www.montbell.jp/" 
+          href="https://www.google.com/maps/search/登山用品店" 
           target="_blank" 
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 text-xs text-slate-400 hover:text-blue-600 transition-colors"
+          className="inline-flex items-center gap-2 text-xs text-slate-500 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200"
         >
-          <ShoppingBag size={14} />
-          在日本哪裡買？推薦 Montbell 或好日山莊
+          <MapPin size={14} className="text-red-500" />
+          <span className="font-bold">找不到裝備？</span>
+          搜尋附近的登山用品店
+          <ShoppingBag size={12} className="opacity-50"/>
         </a>
       </div>
     </div>

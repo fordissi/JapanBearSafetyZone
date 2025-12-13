@@ -7,6 +7,8 @@ export interface BearHotspot {
   count: number;
   source: string;
   date: string; // YYYY-MM-DD
+  url?: string; // Optional external link
+  provider?: 'gemini' | 'grok'; // Distinguished AI Source
 }
 
 export interface QuizQuestion {
