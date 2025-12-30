@@ -279,7 +279,7 @@ const BearMap: React.FC<BearMapProps> = ({ hotspots, onScan, loading, lastUpdate
                   {/* Gray Marker RESTORED */}
                   <div className="flex items-center gap-2">
                      <div className="w-3 h-3 rounded-full bg-slate-400 border border-slate-600"></div>
-                     <span className="text-xs text-slate-500">非近期 (>14天)</span>
+                     <span className="text-xs text-slate-500">非近期 (&gt;14天)</span>
                   </div>
                   <div className="flex items-center gap-2">
                      <div className="w-3 h-3 bg-slate-400 border border-slate-600 transform rotate-45"></div>
