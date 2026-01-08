@@ -10,8 +10,45 @@ import { GoogleGenAI } from "@google/genai";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import sqlite3 from 'sqlite3';
+
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Initialize Database
+const db = new sqlite3.Database('./database.db', (err) => {
+  if (err) console.error('[DB] ❌ Connection error:', err.message);
+  else console.log('[DB] ✅ Connected to SQLite database.');
+});
+
+// Create Tables
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS search_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_query TEXT,
+    data_hash TEXT UNIQUE,
+    sighting_date TEXT,
+    fetched_at INTEGER,
+    provider TEXT,
+    json_payload TEXT
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS species_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    geo_key TEXT UNIQUE,
+    data_json TEXT,
+    updated_at INTEGER
+  )`);
+});
+
+// DB Promise Helpers
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+  db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+});
+
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+  db.run(sql, params, function (err) { err ? reject(err) : resolve(this); });
+});
 
 app.enable('trust proxy');
 app.use(cors());
@@ -298,6 +335,21 @@ const performSpeciesAnalysis = async (lat, lng) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) return null;
 
+  // 1. Check Cache (11km precision)
+  const geoKey = `${Number(lat).toFixed(1)},${Number(lng).toFixed(1)}`;
+  try {
+    const cached = await dbGet('SELECT * FROM species_cache WHERE geo_key = ?', [geoKey]);
+    if (cached) {
+      const age = Date.now() - cached.updated_at;
+      if (age < 30 * 24 * 60 * 60 * 1000) { // 30 Days TTL
+        console.log(`[Server] 🐻 Species Cache Hit: ${geoKey}`);
+        return JSON.parse(cached.data_json);
+      }
+    }
+  } catch (e) {
+    console.warn(`[Server] Species Cache Check Error: ${e.message}`);
+  }
+
   try {
     const ai = new GoogleGenAI({ apiKey });
 
@@ -337,7 +389,19 @@ const performSpeciesAnalysis = async (lat, lng) => {
     });
 
     const text = typeof response.text === 'function' ? response.text() : (response.text || "");
-    return JSON.parse(text);
+    const data = JSON.parse(text);
+
+    // 2. Store in Cache
+    if (data.name) {
+      await dbRun(
+        `INSERT OR REPLACE INTO species_cache (geo_key, data_json, updated_at) VALUES (?, ?, ?)`,
+        [geoKey, JSON.stringify(data), Date.now()]
+      );
+      console.log(`[Server] 💾 Species Cached: ${geoKey}`);
+    }
+
+    return data;
+
   } catch (e) {
     console.error(`[Server] Species Analysis Error: ${e.message}`);
     return null;
@@ -382,6 +446,63 @@ app.post('/api/verify', async (req, res) => {
 app.post('/api/scan', async (req, res) => {
   console.log("[Server] Scan request");
   const { location } = req.body;
+  const dbLocation = location || "Japan"; // Normalize key
+
+  // 1. Check Cache
+  try {
+    const cached = await dbGet(
+      'SELECT * FROM search_results WHERE search_query = ? AND fetched_at > ?',
+      [dbLocation, Date.now() - 24 * 60 * 60 * 1000]
+    );
+
+    if (cached) {
+      console.log(`[Server] ⚡ Search Cache Hit: ${dbLocation}`);
+      let storedItems = JSON.parse(cached.json_payload);
+
+      // Re-inject fresh Search Summary if needed (or if list is empty)
+      // We always want the summary fallback available or consistent with live behavior
+      const hasSummary = storedItems.some(i => i.isSearchSummary);
+      if (!hasSummary) {
+        // Generate fresh summary item
+        const searchQuery = `熊出没 ${location || "Japan"}`;
+        const encodedQuery = encodeURIComponent(searchQuery);
+
+        let fallbackLat = 38.2682;
+        let fallbackLng = 140.8694;
+        if (location && location.includes("札幌")) { fallbackLat = 43.0618; fallbackLng = 141.3545; }
+        else if (location && location.includes("東京")) { fallbackLat = 35.6895; fallbackLng = 139.6917; }
+        else if (location && location.includes("秋田")) { fallbackLat = 39.7169; fallbackLng = 140.1025; }
+
+        const summaryItem = {
+          "id": "x-search-summary-cache-" + Date.now(),
+          "title": `X.com 實時搜尋: ${location || "仙台及周邊"}`,
+          "jp_title": `X.com 實時搜尋: ${location || "仙台及周邊"}`,
+          "lat": fallbackLat,
+          "lng": fallbackLng,
+          "desc": `Grok 暫未抓取到具體貼文 (Cache)。點擊標題直接查看 X.com 上關於「${searchQuery}」的最新即時結果。`,
+          "count": 1,
+          "source": "X.com Search",
+          "date": new Date().toISOString().split('T')[0],
+          "url": `https://x.com/search?q=${encodedQuery}&src=typed_query&f=live`,
+          "isSearchSummary": true,
+          "provider": "grok"
+        };
+
+        // Only add summary if we have 0 items OR if we want it as a standard feature
+        // Current logic: Grok adds it if 0 results. Let's mirror that.
+        if (storedItems.length === 0) {
+          storedItems.push(summaryItem);
+        }
+      }
+
+      globalCache = {
+        hotspots: storedItems,
+        timestamp: cached.fetched_at,
+        counts: { grok: storedItems.filter(i => i.provider === 'grok').length, gemini: storedItems.filter(i => i.provider === 'gemini').length }
+      };
+      return res.json(globalCache);
+    }
+  } catch (e) { console.warn(`[Server] Search Cache Check Error: ${e.message}`); }
 
   const xaiKey = process.env.XAI_API_KEY;
   const googleKey = process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
@@ -410,6 +531,28 @@ app.post('/api/scan', async (req, res) => {
   const combined = [...grokData, ...geminiData].sort((a, b) => new Date(b.date) - new Date(a.date));
 
   console.log("[Server] Providers:", combined.map(i => i.provider));
+
+  // 2. Store in Cache (Exclude isSearchSummary items)
+  try {
+    const toStore = combined.filter(item => !item.isSearchSummary);
+    // Hash logic is optional, simpler to just upsert based on Query? 
+    // But wait, schema has `data_hash`. I'll ignore it for now or just rely on AUTO_ID.
+    // To keep it simple: We just log the query. 
+    // Ideally we delete old cache for this query first (or updated logic).
+    // For now: Just insert. Since we don't have unique constraint on search_query, we will just insert.
+    // But Wait! `dbGet` gets the *latest*? No, `dbGet` gets the first row. 
+    // Use SELECT * ... ORDER BY fetched_at DESC LIMIT 1.
+    // Or simpler: Delete old entries for this query before inserting.
+
+    await dbRun('DELETE FROM search_results WHERE search_query = ?', [dbLocation]);
+    await dbRun(
+      'INSERT INTO search_results (search_query, data_hash, sighting_date, fetched_at, provider, json_payload) VALUES (?, ?, ?, ?, ?, ?)',
+      [dbLocation, 'hash-' + Date.now(), dateLimit, Date.now(), 'mixed', JSON.stringify(toStore)]
+    );
+    console.log(`[Server] 💾 Search Results Cached: ${dbLocation} (${toStore.length} items)`);
+  } catch (e) {
+    console.error(`[Server] Cache Store Error: ${e.message}`);
+  }
 
   globalCache = {
     hotspots: combined,
