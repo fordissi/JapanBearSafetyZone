@@ -12,13 +12,14 @@ export interface BearHotspot {
   provider?: 'gemini' | 'grok' | 'user'; // Distinguished AI Source or User
   verificationStatus?: 'VERIFIED' | 'PENDING' | 'REJECTED'; // For user reports
   confidence?: number; // AI confidence score
+  isSearchSummary?: boolean; // New flag for fallback items
 }
 
 export interface QuizQuestion {
   id: number;
   scenario: string;
   // Multiple images for random selection to keep it fresh but fast
-  scenarioImages: string[]; 
+  scenarioImages: string[];
   // Images to show based on result
   successImages: string[];
   failureImages: string[];

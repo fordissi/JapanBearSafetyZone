@@ -4,7 +4,7 @@ import BearMap from './components/BearMap';
 import AlertSystem from './components/AlertSystem';
 import Quiz from './components/Quiz';
 import GearChecklist from './components/GearChecklist';
-import ReportModal from './components/ReportModal'; // NEW
+import ReportModal from './components/ReportModal';
 import { BearHotspot } from './types';
 import { performScan } from './utils/aiService';
 
@@ -18,13 +18,14 @@ const App: React.FC = () => {
   // Detailed Error State
   const [scanError, setScanError] = useState<{ message: string, details?: string } | null>(null);
 
-  const [keyStatusText, setKeyStatusText] = useState<string>('System Ready');
   const [cooldown, setCooldown] = useState(0);
-  const [showReportModal, setShowReportModal] = useState(false); // New state for report modal
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  // Location States
   const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | undefined>(undefined);
+  const [searchLocationQuery, setSearchLocationQuery] = useState('');
 
-  // Guidelines: API Key handled externally via process.env.API_KEY.
-
+  // Cooldown Timer
   useEffect(() => {
     if (cooldown > 0) {
       const timer = setTimeout(() => setCooldown(c => c - 1), 1000);
@@ -32,13 +33,28 @@ const App: React.FC = () => {
     }
   }, [cooldown]);
 
-  // Initial Location Check for Reporting
+  // Initial Location Check for Reporting & My Location feature
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
         (err) => console.log("User location denied/unavailable", err)
       );
+    }
+  }, []);
+
+  // Initial Load from Cache
+  useEffect(() => {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      try {
+        const { data, timestamp, counts } = JSON.parse(cached);
+        if (Array.isArray(data) && data.length > 0) {
+          setHotspots(data);
+          const c = counts || { grok: 0, gemini: data.length };
+          setLastUpdated(`Cached: ${new Date(timestamp).toLocaleTimeString()}`);
+        }
+      } catch (e) { }
     }
   }, []);
 
@@ -51,21 +67,20 @@ const App: React.FC = () => {
     return str;
   };
 
-  // Initial Load from Cache
-  useEffect(() => {
-    const cached = localStorage.getItem(STORAGE_KEY);
-    if (cached) {
-      try {
-        const { data, timestamp, counts } = JSON.parse(cached);
-        if (Array.isArray(data) && data.length > 0) {
-          setHotspots(data);
-          // If counts exist in cache use them, otherwise default to 0
-          const c = counts || { grok: 0, gemini: data.length };
-          setLastUpdated(`Cached: ${new Date(timestamp).toLocaleTimeString()}`);
-        }
-      } catch (e) { }
+  const handleUseCurrentLocation = () => {
+    if (userLocation) {
+      setSearchLocationQuery(`Near ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`);
+    } else {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          setUserLocation({ lat: latitude, lng: longitude });
+          setSearchLocationQuery(`Near ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        },
+        () => alert("無法獲取您的位置，請手動輸入城市名稱。")
+      );
     }
-  }, []);
+  };
 
   const handleScan = async () => {
     if (cooldown > 0) return;
@@ -74,7 +89,8 @@ const App: React.FC = () => {
     setScanError(null);
 
     try {
-      const result = await performScan();
+      // Pass the search location query to the scan function
+      const result = await performScan(undefined, searchLocationQuery);
 
       if (result.hotspots.length === 0) {
         throw new Error("AI 未能找到相關新聞。請稍後再試。");
@@ -103,14 +119,12 @@ const App: React.FC = () => {
   };
 
   const handleNewReport = (report: BearHotspot) => {
-    // Add new verified report to the list
     const updated = [report, ...hotspots];
     setHotspots(updated);
-    // Update cache as well to persist the user report locally
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       data: updated,
       timestamp: Date.now(),
-      counts: { grok: 0, gemini: updated.length } // simplified count update
+      counts: { grok: 0, gemini: updated.length }
     }));
     setShowReportModal(false);
   };
@@ -136,11 +150,8 @@ const App: React.FC = () => {
           onClose={() => setShowReportModal(false)}
           onSubmit={handleNewReport}
           userLocation={userLocation}
-        // xaiKey prop removed as it's handled on backend now
         />
       )}
-
-      {/* Settings Modal - REMOVED (No longer needed) */}
 
       {/* Hero Header */}
       <header className="relative bg-slate-900 text-white overflow-hidden shadow-2xl">
@@ -149,7 +160,6 @@ const App: React.FC = () => {
 
         {/* Top Right Controls Container */}
         <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
-          {/* Report Button (Moved Here) */}
           <button
             onClick={() => setShowReportModal(true)}
             className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg transition-transform hover:scale-105 active:scale-95 border border-red-500"
@@ -157,8 +167,6 @@ const App: React.FC = () => {
             <Camera size={18} />
             <span className="hidden sm:inline">回報目擊</span>
           </button>
-
-          {/* Settings Button Removed */}
         </div>
 
         <div className="max-w-6xl mx-auto pt-16 pb-24 px-6 relative z-10 text-center">
@@ -179,6 +187,7 @@ const App: React.FC = () => {
 
       <main className="max-w-6xl mx-auto px-4 -mt-20 space-y-8 relative z-20">
         <section className="bg-white/80 backdrop-blur-xl rounded-3xl p-2 shadow-2xl border border-white/50 ring-1 ring-slate-900/5 relative overflow-hidden min-h-[550px]">
+
           {/* General Error Overlay */}
           {scanError && (
             <div className="absolute inset-0 z-[500] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
@@ -203,16 +212,17 @@ const App: React.FC = () => {
             loading={loading}
             lastUpdated={lastUpdated}
             cooldown={cooldown}
+            searchLocation={searchLocationQuery}
+            setSearchLocation={setSearchLocationQuery}
+            onUseCurrentLocation={handleUseCurrentLocation}
           />
         </section>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <section id="alert-section"><AlertSystem hotspots={hotspots} /></section>
-          {/* Added ID for scroll targeting */}
           <section id="gear-section" className="scroll-mt-24"><GearChecklist /></section>
         </div>
 
-        {/* Added ID for scroll targeting */}
         <section id="quiz-section" className="scroll-mt-24"><Quiz /></section>
 
         <footer className="text-center text-slate-500 text-sm py-12 border-t border-slate-200/60 mt-8 flex flex-col items-center gap-4">

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { BearHotspot } from "../types";
 
-export const performScan = async (xaiKey?: string): Promise<{ hotspots: BearHotspot[], counts: { grok: number, gemini: number } }> => {
+export const performScan = async (xaiKey?: string, location?: string): Promise<{ hotspots: BearHotspot[], counts: { grok: number, gemini: number } }> => {
   try {
     // Call backend scan endpoint which handles both Gemini and Grok logic
     // Note: xaiKey argument is now ignored in favor of backend environment variable
@@ -9,7 +9,7 @@ export const performScan = async (xaiKey?: string): Promise<{ hotspots: BearHots
     const response = await fetch('http://localhost:8080/api/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
+      body: JSON.stringify({ location })
     });
 
     if (!response.ok) {
